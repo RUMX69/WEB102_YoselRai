@@ -1,0 +1,132 @@
+#%RAML 1.0
+title: Book Library API
+version: v1
+baseUri: https://api.booklibrary.com/{version}
+mediaType: application/json
+
+types:
+  Book:
+    properties:
+      id: string
+      title: string
+      author: string
+      genre: string
+      availableCopies: integer
+
+  Member:
+    properties:
+      id: string
+      name: string
+      email: string
+      status: { type: string, enum: [Active, Suspended] }
+
+  BorrowRecord:
+    properties:
+      id: string
+      bookId: string
+      memberId: string
+      dueDate: date-only
+      status: { type: string, enum: [Borrowed, Returned, Overdue] }
+
+traits:
+  secured:
+    headers:
+      Authorization: { type: string, example: "Bearer my-token" }
+    responses:
+      401: { description: Unauthorized }
+
+/books:
+  get:
+    description: List all books.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Book[]
+  post:
+    is: [secured]
+    description: Add a new book.
+    responses:
+      201:
+        body:
+          application/json:
+            type: Book
+  /{bookId}:
+    get:
+      description: Get a book.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Book
+    patch:
+      is: [secured]
+      description: Update a book.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Book
+    delete:
+      is: [secured]
+      description: Delete a book.
+      responses:
+        204: { description: Deleted. }
+
+/members:
+  get:
+    is: [secured]
+    description: List all members.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Member[]
+  post:
+    is: [secured]
+    description: Register a member.
+    responses:
+      201:
+        body:
+          application/json:
+            type: Member
+  /{memberId}:
+    get:
+      is: [secured]
+      description: Get a member.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Member
+    delete:
+      is: [secured]
+      description: Remove a member.
+      responses:
+        204: { description: Deleted. }
+
+/borrows:
+  post:
+    is: [secured]
+    description: Borrow a book.
+    body:
+      application/json:
+        properties:
+          bookId: string
+          memberId: string
+          dueDate: date-only
+    responses:
+      201:
+        body:
+          application/json:
+            type: BorrowRecord
+      409: { description: No copies available or member has overdue books. }
+  /{borrowId}/return:
+    post:
+      is: [secured]
+      description: Return a borrowed book.
+      responses:
+        200:
+          body:
+            application/json:
+              type: BorrowRecord

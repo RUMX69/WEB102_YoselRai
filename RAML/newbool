@@ -1,0 +1,404 @@
+#%RAML 1.0
+title: Book Library API
+version: v1
+baseUri: https://api.booklibrary.com/{version}
+mediaType: application/json
+
+description: A simple REST API for managing a book library — books, authors, members, and borrowing.
+
+# ─────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────
+types:
+
+  Book:
+    properties:
+      id:          { type: string,  example: "book-101" }
+      title:       { type: string,  example: "1984" }
+      isbn:        { type: string,  example: "978-0451524935" }
+      authorId:    { type: string,  example: "auth-001" }
+      genre:
+        type: string
+        enum: [Fiction, Non-Fiction, Science Fiction, Fantasy, Mystery, Biography, Other]
+        example: "Science Fiction"
+      publishedYear: { type: integer, example: 1949 }
+      totalCopies:   { type: integer, example: 5 }
+      availableCopies: { type: integer, example: 3 }
+
+  Author:
+    properties:
+      id:          { type: string, example: "auth-001" }
+      name:        { type: string, example: "George Orwell" }
+      nationality: { type: string, required: false, example: "British" }
+
+  Member:
+    properties:
+      id:     { type: string,    example: "mem-501" }
+      name:   { type: string,    example: "Alice Johnson" }
+      email:  { type: string,    example: "alice@example.com" }
+      status:
+        type: string
+        enum: [Active, Suspended, Expired]
+        example: "Active"
+      membershipDate: { type: date-only, example: "2023-01-15" }
+
+  BorrowRecord:
+    properties:
+      id:         { type: string,    example: "borrow-901" }
+      bookId:     { type: string,    example: "book-101" }
+      memberId:   { type: string,    example: "mem-501" }
+      borrowDate: { type: date-only, example: "2024-03-01" }
+      dueDate:    { type: date-only, example: "2024-03-15" }
+      returnDate: { type: date-only, required: false, example: "2024-03-14" }
+      status:
+        type: string
+        enum: [Borrowed, Returned, Overdue]
+        example: "Borrowed"
+
+  Error:
+    properties:
+      code:    { type: integer, example: 404 }
+      message: { type: string,  example: "Not found" }
+
+# ─────────────────────────────────────────────
+# Traits
+# ─────────────────────────────────────────────
+traits:
+
+  paginated:
+    queryParameters:
+      page:     { type: integer, default: 1,  description: "Page number" }
+      pageSize: { type: integer, default: 20, description: "Results per page" }
+
+  secured:
+    headers:
+      Authorization:
+        description: "Bearer <token>"
+        example: "Bearer my-secret-token"
+    responses:
+      401:
+        description: Unauthorized
+        body:
+          application/json:
+            type: Error
+
+  notFound:
+    responses:
+      404:
+        description: Resource not found
+        body:
+          application/json:
+            type: Error
+
+# ─────────────────────────────────────────────
+# /books
+# ─────────────────────────────────────────────
+/books:
+  description: Manage the book catalog.
+
+  get:
+    is: [paginated]
+    description: List all books.
+    queryParameters:
+      genre:
+        type: string
+        required: false
+        description: Filter by genre
+      available:
+        type: boolean
+        required: false
+        description: Show only available books
+    responses:
+      200:
+        body:
+          application/json:
+            type: Book[]
+            example: |
+              [
+                {
+                  "id": "book-101",
+                  "title": "1984",
+                  "isbn": "978-0451524935",
+                  "authorId": "auth-001",
+                  "genre": "Science Fiction",
+                  "publishedYear": 1949,
+                  "totalCopies": 5,
+                  "availableCopies": 3
+                }
+              ]
+
+  post:
+    is: [secured]
+    description: Add a new book.
+    body:
+      application/json:
+        properties:
+          title:        { type: string,  required: true }
+          isbn:         { type: string,  required: true }
+          authorId:     { type: string,  required: true }
+          genre:        { type: string,  required: true }
+          publishedYear:{ type: integer, required: true }
+          totalCopies:  { type: integer, required: true }
+        example: |
+          {
+            "title": "Animal Farm",
+            "isbn": "978-0451526342",
+            "authorId": "auth-001",
+            "genre": "Fiction",
+            "publishedYear": 1945,
+            "totalCopies": 4
+          }
+    responses:
+      201:
+        body:
+          application/json:
+            type: Book
+
+  /{bookId}:
+    uriParameters:
+      bookId: { type: string, example: "book-101" }
+
+    get:
+      is: [notFound]
+      description: Get a single book by ID.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Book
+
+    patch:
+      is: [secured, notFound]
+      description: Update a book's details.
+      body:
+        application/json:
+          properties:
+            title:       { type: string,  required: false }
+            totalCopies: { type: integer, required: false }
+          example: |
+            { "totalCopies": 6 }
+      responses:
+        200:
+          body:
+            application/json:
+              type: Book
+
+    delete:
+      is: [secured, notFound]
+      description: Remove a book from the catalog.
+      responses:
+        204:
+          description: Deleted successfully.
+
+# ─────────────────────────────────────────────
+# /authors
+# ─────────────────────────────────────────────
+/authors:
+  description: Manage authors.
+
+  get:
+    is: [paginated]
+    description: List all authors.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Author[]
+
+  post:
+    is: [secured]
+    description: Add a new author.
+    body:
+      application/json:
+        properties:
+          name:        { type: string, required: true }
+          nationality: { type: string, required: false }
+        example: |
+          { "name": "George Orwell", "nationality": "British" }
+    responses:
+      201:
+        body:
+          application/json:
+            type: Author
+
+  /{authorId}:
+    uriParameters:
+      authorId: { type: string, example: "auth-001" }
+
+    get:
+      is: [notFound]
+      description: Get a single author.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Author
+
+    delete:
+      is: [secured, notFound]
+      description: Remove an author.
+      responses:
+        204:
+          description: Deleted successfully.
+
+    /books:
+      get:
+        is: [paginated]
+        description: List all books by this author.
+        responses:
+          200:
+            body:
+              application/json:
+                type: Book[]
+
+# ─────────────────────────────────────────────
+# /members
+# ─────────────────────────────────────────────
+/members:
+  description: Manage library members.
+
+  get:
+    is: [paginated, secured]
+    description: List all members.
+    queryParameters:
+      status:
+        type: string
+        enum: [Active, Suspended, Expired]
+        required: false
+    responses:
+      200:
+        body:
+          application/json:
+            type: Member[]
+
+  post:
+    is: [secured]
+    description: Register a new member.
+    body:
+      application/json:
+        properties:
+          name:  { type: string, required: true }
+          email: { type: string, required: true }
+        example: |
+          { "name": "Alice Johnson", "email": "alice@example.com" }
+    responses:
+      201:
+        body:
+          application/json:
+            type: Member
+
+  /{memberId}:
+    uriParameters:
+      memberId: { type: string, example: "mem-501" }
+
+    get:
+      is: [secured, notFound]
+      description: Get a single member.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Member
+
+    patch:
+      is: [secured, notFound]
+      description: Update member info or status.
+      body:
+        application/json:
+          properties:
+            name:   { type: string, required: false }
+            status: { type: string, required: false, enum: [Active, Suspended, Expired] }
+          example: |
+            { "status": "Suspended" }
+      responses:
+        200:
+          body:
+            application/json:
+              type: Member
+
+    delete:
+      is: [secured, notFound]
+      description: Remove a member.
+      responses:
+        204:
+          description: Deleted successfully.
+
+# ─────────────────────────────────────────────
+# /borrows
+# ─────────────────────────────────────────────
+/borrows:
+  description: Manage book borrowing and returns.
+
+  get:
+    is: [paginated, secured]
+    description: List all borrow records.
+    queryParameters:
+      status:
+        type: string
+        enum: [Borrowed, Returned, Overdue]
+        required: false
+    responses:
+      200:
+        body:
+          application/json:
+            type: BorrowRecord[]
+
+  post:
+    is: [secured]
+    description: Issue a book to a member.
+    body:
+      application/json:
+        properties:
+          bookId:   { type: string,    required: true }
+          memberId: { type: string,    required: true }
+          dueDate:  { type: date-only, required: true }
+        example: |
+          {
+            "bookId": "book-101",
+            "memberId": "mem-501",
+            "dueDate": "2024-04-15"
+          }
+    responses:
+      201:
+        body:
+          application/json:
+            type: BorrowRecord
+      409:
+        description: No copies available or member has overdue books.
+        body:
+          application/json:
+            type: Error
+
+  /{borrowId}:
+    uriParameters:
+      borrowId: { type: string, example: "borrow-901" }
+
+    get:
+      is: [secured, notFound]
+      description: Get a single borrow record.
+      responses:
+        200:
+          body:
+            application/json:
+              type: BorrowRecord
+
+    /return:
+      post:
+        is: [secured, notFound]
+        description: Process the return of a borrowed book.
+        body:
+          application/json:
+            properties:
+              returnDate: { type: date-only, required: false, description: "Defaults to today if omitted." }
+            example: |
+              { "returnDate": "2024-04-10" }
+        responses:
+          200:
+            body:
+              application/json:
+                type: BorrowRecord
+          409:
+            description: Book already returned.
+            body:
+              application/json:
+                type: Error

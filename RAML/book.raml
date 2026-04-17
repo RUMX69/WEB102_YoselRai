@@ -1,0 +1,754 @@
+#%RAML 1.0
+title: Book Library API
+version: v1
+baseUri: https://api.booklibrary.com/{version}
+mediaType: application/json
+
+description: |
+  A RESTful API for managing a book library system.
+  Supports full CRUD operations for books, authors, and members,
+  along with borrowing and returning books.
+
+documentation:
+  - title: Getting Started
+    content: |
+      Welcome to the Book Library API. This API allows you to manage books,
+      authors, and library members. Authentication is required for all write
+      operations (POST, PUT, PATCH, DELETE).
+
+  - title: Authentication
+    content: |
+      This API uses Bearer Token authentication.
+      Include the token in the Authorization header:
+        Authorization: Bearer <your_token>
+
+# ─────────────────────────────────────────────
+# Security Schemes
+# ─────────────────────────────────────────────
+securitySchemes:
+  bearerToken:
+    description: Bearer token authentication
+    type: Pass Through
+    describedBy:
+      headers:
+        Authorization:
+          description: Bearer token
+          type: string
+          example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        401:
+          description: Unauthorized – token missing or invalid
+        403:
+          description: Forbidden – insufficient permissions
+
+# ─────────────────────────────────────────────
+# Reusable Types
+# ─────────────────────────────────────────────
+types:
+
+  Author:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the author
+        example: "auth-001"
+      name:
+        type: string
+        description: Full name of the author
+        example: "George Orwell"
+      bio:
+        type: string
+        required: false
+        description: Short biography
+        example: "English novelist and essayist, journalist and critic."
+      nationality:
+        type: string
+        required: false
+        example: "British"
+
+  Book:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the book
+        example: "book-101"
+      title:
+        type: string
+        description: Title of the book
+        example: "1984"
+      isbn:
+        type: string
+        description: ISBN-13 identifier
+        example: "978-0451524935"
+      authorId:
+        type: string
+        description: Reference to the author's ID
+        example: "auth-001"
+      genre:
+        type: string
+        enum: [Fiction, Non-Fiction, Science Fiction, Fantasy, Mystery, Biography, History, Self-Help, Other]
+        example: "Science Fiction"
+      publishedYear:
+        type: integer
+        minimum: 1000
+        maximum: 2100
+        example: 1949
+      totalCopies:
+        type: integer
+        minimum: 0
+        example: 5
+      availableCopies:
+        type: integer
+        minimum: 0
+        example: 3
+      description:
+        type: string
+        required: false
+        example: "A dystopian social science fiction novel."
+
+  Member:
+    type: object
+    properties:
+      id:
+        type: string
+        example: "mem-501"
+      name:
+        type: string
+        example: "Alice Johnson"
+      email:
+        type: string
+        example: "alice@example.com"
+      phone:
+        type: string
+        required: false
+        example: "+1-555-0101"
+      membershipDate:
+        type: date-only
+        example: "2023-01-15"
+      status:
+        type: string
+        enum: [Active, Suspended, Expired]
+        example: "Active"
+
+  BorrowRecord:
+    type: object
+    properties:
+      id:
+        type: string
+        example: "borrow-901"
+      bookId:
+        type: string
+        example: "book-101"
+      memberId:
+        type: string
+        example: "mem-501"
+      borrowDate:
+        type: date-only
+        example: "2024-03-01"
+      dueDate:
+        type: date-only
+        example: "2024-03-15"
+      returnDate:
+        type: date-only
+        required: false
+        example: "2024-03-14"
+      status:
+        type: string
+        enum: [Borrowed, Returned, Overdue]
+        example: "Borrowed"
+
+  ErrorResponse:
+    type: object
+    properties:
+      code:
+        type: integer
+        example: 404
+      message:
+        type: string
+        example: "Resource not found"
+      details:
+        type: string
+        required: false
+        example: "No book found with ID book-999"
+
+  PaginationMeta:
+    type: object
+    properties:
+      total:
+        type: integer
+        example: 120
+      page:
+        type: integer
+        example: 1
+      pageSize:
+        type: integer
+        example: 20
+      totalPages:
+        type: integer
+        example: 6
+
+# ─────────────────────────────────────────────
+# Reusable Traits
+# ─────────────────────────────────────────────
+traits:
+
+  paginated:
+    queryParameters:
+      page:
+        type: integer
+        default: 1
+        minimum: 1
+        description: Page number
+      pageSize:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+        description: Number of results per page
+
+  searchable:
+    queryParameters:
+      q:
+        type: string
+        required: false
+        description: Full-text search query
+        example: "Orwell"
+
+  sortable:
+    queryParameters:
+      sortBy:
+        type: string
+        required: false
+        description: Field to sort results by
+        example: "title"
+      sortOrder:
+        type: string
+        enum: [asc, desc]
+        default: asc
+        required: false
+        description: Sort direction
+
+  secured:
+    securedBy: [bearerToken]
+
+  commonErrors:
+    responses:
+      400:
+        description: Bad Request – invalid input
+        body:
+          application/json:
+            type: ErrorResponse
+      401:
+        description: Unauthorized
+        body:
+          application/json:
+            type: ErrorResponse
+      404:
+        description: Not Found
+        body:
+          application/json:
+            type: ErrorResponse
+      500:
+        description: Internal Server Error
+        body:
+          application/json:
+            type: ErrorResponse
+
+# ─────────────────────────────────────────────
+# Resource: /books
+# ─────────────────────────────────────────────
+/books:
+  description: Manage the library's book catalog.
+
+  get:
+    is: [paginated, searchable, sortable, commonErrors]
+    description: Retrieve a paginated list of all books.
+    queryParameters:
+      genre:
+        type: string
+        required: false
+        description: Filter by genre
+        example: "Fiction"
+      available:
+        type: boolean
+        required: false
+        description: Filter to only show available books
+        example: true
+    responses:
+      200:
+        description: A list of books
+        body:
+          application/json:
+            type: object
+            properties:
+              data:
+                type: Book[]
+              meta:
+                type: PaginationMeta
+            example:
+              data:
+                - id: "book-101"
+                  title: "1984"
+                  isbn: "978-0451524935"
+                  authorId: "auth-001"
+                  genre: "Science Fiction"
+                  publishedYear: 1949
+                  totalCopies: 5
+                  availableCopies: 3
+                  description: "A dystopian social science fiction novel."
+              meta:
+                total: 1
+                page: 1
+                pageSize: 20
+                totalPages: 1
+
+  post:
+    is: [secured, commonErrors]
+    description: Add a new book to the library catalog.
+    body:
+      application/json:
+        type: object
+        properties:
+          title:
+            type: string
+            required: true
+          isbn:
+            type: string
+            required: true
+          authorId:
+            type: string
+            required: true
+          genre:
+            type: string
+            required: true
+          publishedYear:
+            type: integer
+            required: true
+          totalCopies:
+            type: integer
+            required: true
+          description:
+            type: string
+            required: false
+        example:
+          title: "Animal Farm"
+          isbn: "978-0451526342"
+          authorId: "auth-001"
+          genre: "Fiction"
+          publishedYear: 1945
+          totalCopies: 4
+          description: "An allegorical novella."
+    responses:
+      201:
+        description: Book successfully created
+        body:
+          application/json:
+            type: Book
+
+  /{bookId}:
+    description: Operations on a single book.
+    uriParameters:
+      bookId:
+        type: string
+        description: Unique identifier of the book
+        example: "book-101"
+
+    get:
+      is: [commonErrors]
+      description: Retrieve details of a specific book.
+      responses:
+        200:
+          description: Book details
+          body:
+            application/json:
+              type: Book
+
+    put:
+      is: [secured, commonErrors]
+      description: Replace a book record entirely.
+      body:
+        application/json:
+          type: Book
+      responses:
+        200:
+          description: Book successfully updated
+          body:
+            application/json:
+              type: Book
+
+    patch:
+      is: [secured, commonErrors]
+      description: Partially update a book record.
+      body:
+        application/json:
+          type: object
+          properties:
+            title:
+              type: string
+              required: false
+            totalCopies:
+              type: integer
+              required: false
+            description:
+              type: string
+              required: false
+          example:
+            totalCopies: 6
+      responses:
+        200:
+          description: Book partially updated
+          body:
+            application/json:
+              type: Book
+
+    delete:
+      is: [secured, commonErrors]
+      description: Remove a book from the catalog.
+      responses:
+        204:
+          description: Book successfully deleted
+
+    /borrow-history:
+      get:
+        is: [paginated, secured, commonErrors]
+        description: Retrieve borrowing history for a specific book.
+        responses:
+          200:
+            description: List of borrow records for this book
+            body:
+              application/json:
+                type: object
+                properties:
+                  data:
+                    type: BorrowRecord[]
+                  meta:
+                    type: PaginationMeta
+
+# ─────────────────────────────────────────────
+# Resource: /authors
+# ─────────────────────────────────────────────
+/authors:
+  description: Manage authors in the library system.
+
+  get:
+    is: [paginated, searchable, sortable, commonErrors]
+    description: Retrieve a list of all authors.
+    responses:
+      200:
+        description: A list of authors
+        body:
+          application/json:
+            type: object
+            properties:
+              data:
+                type: Author[]
+              meta:
+                type: PaginationMeta
+
+  post:
+    is: [secured, commonErrors]
+    description: Add a new author.
+    body:
+      application/json:
+        type: object
+        properties:
+          name:
+            type: string
+            required: true
+          bio:
+            type: string
+            required: false
+          nationality:
+            type: string
+            required: false
+        example:
+          name: "George Orwell"
+          bio: "English novelist and essayist."
+          nationality: "British"
+    responses:
+      201:
+        description: Author successfully created
+        body:
+          application/json:
+            type: Author
+
+  /{authorId}:
+    uriParameters:
+      authorId:
+        type: string
+        description: Unique identifier of the author
+        example: "auth-001"
+
+    get:
+      is: [commonErrors]
+      description: Retrieve details of a specific author.
+      responses:
+        200:
+          description: Author details
+          body:
+            application/json:
+              type: Author
+
+    put:
+      is: [secured, commonErrors]
+      description: Update an author's details.
+      body:
+        application/json:
+          type: Author
+      responses:
+        200:
+          description: Author successfully updated
+          body:
+            application/json:
+              type: Author
+
+    delete:
+      is: [secured, commonErrors]
+      description: Remove an author from the system.
+      responses:
+        204:
+          description: Author successfully deleted
+
+    /books:
+      get:
+        is: [paginated, commonErrors]
+        description: List all books written by a specific author.
+        responses:
+          200:
+            description: Books by this author
+            body:
+              application/json:
+                type: object
+                properties:
+                  data:
+                    type: Book[]
+                  meta:
+                    type: PaginationMeta
+
+# ─────────────────────────────────────────────
+# Resource: /members
+# ─────────────────────────────────────────────
+/members:
+  description: Manage library members.
+
+  get:
+    is: [paginated, searchable, secured, commonErrors]
+    description: Retrieve all library members.
+    queryParameters:
+      status:
+        type: string
+        enum: [Active, Suspended, Expired]
+        required: false
+        description: Filter by membership status
+    responses:
+      200:
+        description: List of members
+        body:
+          application/json:
+            type: object
+            properties:
+              data:
+                type: Member[]
+              meta:
+                type: PaginationMeta
+
+  post:
+    is: [secured, commonErrors]
+    description: Register a new library member.
+    body:
+      application/json:
+        type: object
+        properties:
+          name:
+            type: string
+            required: true
+          email:
+            type: string
+            required: true
+          phone:
+            type: string
+            required: false
+        example:
+          name: "Alice Johnson"
+          email: "alice@example.com"
+          phone: "+1-555-0101"
+    responses:
+      201:
+        description: Member successfully registered
+        body:
+          application/json:
+            type: Member
+
+  /{memberId}:
+    uriParameters:
+      memberId:
+        type: string
+        description: Unique identifier of the member
+        example: "mem-501"
+
+    get:
+      is: [secured, commonErrors]
+      description: Get details of a specific member.
+      responses:
+        200:
+          description: Member details
+          body:
+            application/json:
+              type: Member
+
+    patch:
+      is: [secured, commonErrors]
+      description: Update member information or status.
+      body:
+        application/json:
+          type: object
+          properties:
+            name:
+              type: string
+              required: false
+            phone:
+              type: string
+              required: false
+            status:
+              type: string
+              enum: [Active, Suspended, Expired]
+              required: false
+          example:
+            status: "Suspended"
+      responses:
+        200:
+          description: Member successfully updated
+          body:
+            application/json:
+              type: Member
+
+    delete:
+      is: [secured, commonErrors]
+      description: Remove a member from the system.
+      responses:
+        204:
+          description: Member successfully deleted
+
+    /borrows:
+      get:
+        is: [paginated, secured, commonErrors]
+        description: View borrowing history for a specific member.
+        queryParameters:
+          status:
+            type: string
+            enum: [Borrowed, Returned, Overdue]
+            required: false
+        responses:
+          200:
+            description: List of borrow records for this member
+            body:
+              application/json:
+                type: object
+                properties:
+                  data:
+                    type: BorrowRecord[]
+                  meta:
+                    type: PaginationMeta
+
+# ─────────────────────────────────────────────
+# Resource: /borrows
+# ─────────────────────────────────────────────
+/borrows:
+  description: Manage book borrowing and returns.
+
+  get:
+    is: [paginated, secured, commonErrors]
+    description: Retrieve all borrow records.
+    queryParameters:
+      status:
+        type: string
+        enum: [Borrowed, Returned, Overdue]
+        required: false
+        description: Filter by borrow status
+    responses:
+      200:
+        description: List of borrow records
+        body:
+          application/json:
+            type: object
+            properties:
+              data:
+                type: BorrowRecord[]
+              meta:
+                type: PaginationMeta
+
+  post:
+    is: [secured, commonErrors]
+    description: Issue a book to a library member.
+    body:
+      application/json:
+        type: object
+        properties:
+          bookId:
+            type: string
+            required: true
+          memberId:
+            type: string
+            required: true
+          dueDate:
+            type: date-only
+            required: true
+        example:
+          bookId: "book-101"
+          memberId: "mem-501"
+          dueDate: "2024-04-15"
+    responses:
+      201:
+        description: Book successfully borrowed
+        body:
+          application/json:
+            type: BorrowRecord
+      409:
+        description: Conflict – no copies available or member has overdue books
+        body:
+          application/json:
+            type: ErrorResponse
+
+  /{borrowId}:
+    uriParameters:
+      borrowId:
+        type: string
+        example: "borrow-901"
+
+    get:
+      is: [secured, commonErrors]
+      description: Get details of a specific borrow record.
+      responses:
+        200:
+          description: Borrow record details
+          body:
+            application/json:
+              type: BorrowRecord
+
+    /return:
+      post:
+        is: [secured, commonErrors]
+        description: Process the return of a borrowed book.
+        body:
+          application/json:
+            type: object
+            properties:
+              returnDate:
+                type: date-only
+                required: false
+                description: Defaults to today's date if not provided
+            example:
+              returnDate: "2024-04-10"
+        responses:
+          200:
+            description: Book successfully returned
+            body:
+              application/json:
+                type: BorrowRecord
+          409:
+            description: Conflict – book already returned
+            body:
+              application/json:
+                type: ErrorResponse
