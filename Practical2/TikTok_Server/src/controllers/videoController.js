@@ -3,11 +3,11 @@ const prisma = require('../lib/prisma');
 // Get all videos
 exports.getAllVideos = async (req, res) => {
   try {
-    const { limit = 10 } = req.query;
+    const { cursor, limit = 10 } = req.query;
     const limitNum = parseInt(limit) || 10;
 
-    const videos = await prisma.video.findMany({
-      take: limitNum,
+    const queryOptions = {
+      take: limitNum + 1,  // fetch one extra to check hasNextPage
       orderBy: { createdAt: 'desc' },
       include: {
         user: {
@@ -24,16 +24,32 @@ exports.getAllVideos = async (req, res) => {
           }
         }
       }
-    });
+    };
 
-    const formattedVideos = videos.map(video => ({
+    if (cursor) {
+      queryOptions.cursor = { id: cursor };
+      queryOptions.skip = 1;  // skip the cursor item itself
+    }
+
+    const videos = await prisma.video.findMany(queryOptions);
+
+    const hasNextPage = videos.length > limitNum;
+    const results = hasNextPage ? videos.slice(0, -1) : videos;
+    const nextCursor = hasNextPage
+      ? results[results.length - 1].id
+      : null;
+
+    const formattedVideos = results.map(video => ({
       ...video,
       likeCount: video._count.likes,
       commentCount: video._count.comments,
       _count: undefined,
     }));
 
-    res.status(200).json({ videos: formattedVideos });
+    res.status(200).json({
+      videos: formattedVideos,
+      pagination: { nextCursor, hasNextPage }
+    });
   } catch (error) {
     console.error('Error getting videos:', error);
     res.status(500).json({ message: 'Server error' });
@@ -123,7 +139,7 @@ exports.getUserVideosByUserId = async (req, res) => {
 exports.getFollowingVideos = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { limit = 10 } = req.query;
+    const { cursor, limit = 10 } = req.query;
     const limitNum = parseInt(limit) || 10;
 
     const following = await prisma.follow.findMany({
@@ -140,9 +156,9 @@ exports.getFollowingVideos = async (req, res) => {
       });
     }
 
-    const videos = await prisma.video.findMany({
+    const queryOptions = {
       where: { userId: { in: followingIds } },
-      take: limitNum,
+      take: limitNum + 1,
       orderBy: { createdAt: 'desc' },
       include: {
         user: {
@@ -159,16 +175,32 @@ exports.getFollowingVideos = async (req, res) => {
           }
         }
       }
-    });
+    };
 
-    const formattedVideos = videos.map(video => ({
+    if (cursor) {
+      queryOptions.cursor = { id: cursor };
+      queryOptions.skip = 1;
+    }
+
+    const videos = await prisma.video.findMany(queryOptions);
+
+    const hasNextPage = videos.length > limitNum;
+    const results = hasNextPage ? videos.slice(0, -1) : videos;
+    const nextCursor = hasNextPage
+      ? results[results.length - 1].id
+      : null;
+
+    const formattedVideos = results.map(video => ({
       ...video,
       likeCount: video._count.likes,
       commentCount: video._count.comments,
       _count: undefined,
     }));
 
-    res.status(200).json({ videos: formattedVideos });
+    res.status(200).json({
+      videos: formattedVideos,
+      pagination: { nextCursor, hasNextPage }
+    });
   } catch (error) {
     console.error('Error getting following videos:', error);
     res.status(500).json({ message: 'Server error' });
